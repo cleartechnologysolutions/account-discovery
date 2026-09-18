@@ -1,0 +1,50 @@
+{
+  "name": "account-discovery",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-05-15",
+  "workers_dev": true,
+  "preview_urls": false,
+  "keep_vars": true,
+  "observability": {
+    "enabled": false
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "ratelimits": [
+    {
+      "name": "LOGIN_LIMIT",
+      "namespace_id": "91826001",
+      "simple": {
+        "limit": 5,
+        "period": 60
+      }
+    },
+    {
+      "name": "LOGIN_GLOBAL",
+      "namespace_id": "91826002",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    },
+    {
+      "name": "APP_LIMIT",
+      "namespace_id": "91826003",
+      "simple": {
+        "limit": 100,
+        "period": 60
+      }
+    },
+    {
+      "name": "MS_LIMIT",
+      "namespace_id": "91826004",
+      "simple": {
+        "limit": 12,
+        "period": 60
+      }
+    }
+  ]
+}
