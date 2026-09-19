@@ -33,7 +33,7 @@ test('Microsoft tri-state classification never promotes ambiguous responses',()=
  for(const status of [302,403,429,500])assert.equal(classifyMicrosoft({},status).stop,true);
 });
 test('Microsoft uses username-only discovery, refuses redirects and oversized data',async()=>{
- const r=await microsoftCheck('jane@example.com',async(url,init)=>{assert.equal(url,'https://login.microsoftonline.com/common/GetCredentialType');assert.equal(init.redirect,'manual');const payload=JSON.parse(init.body);assert.equal(payload.username,'jane@example.com');assert.ok(!('password' in payload));return Response.json({IfExistsResult:0,Credentials:{}});});assert.equal(r.status,'likely-exists');
+ const r=await microsoftCheck('jane@example.com',async(url,init)=>{assert.equal(url,'https://login.microsoftonline.com/common/GetCredentialType');assert.equal(init.redirect,'manual');const payload=JSON.parse(init.body);assert.equal(payload.username,'jane@example.com');assert.ok(!('password' in payload));for(const key of ['isOtherIdpSupported','isRemoteNGCSupported','isFidoSupported','isAccessPassSupported','forceotclogin'])assert.equal(payload[key],false,key);assert.equal(payload.otclogindisallowed,true);return Response.json({IfExistsResult:0,Credentials:{}});});assert.equal(r.status,'likely-exists');
  assert.equal((await microsoftCheck('jane@example.com',async()=>new Response('challenge',{status:403}))).stop,true);
  assert.equal((await microsoftCheck('jane@example.com',async()=>new Response('x'.repeat(70000),{headers:{'content-type':'application/json'}}))).status,'inconclusive');
 });
@@ -53,9 +53,44 @@ test('authorization, CSRF, scope and calibration enforced before external lookup
 test('calibration fails closed on catchall and enables only matching control responses',async()=>{
  const {e,req}=await fixture();let count=0;
  const bad=await handle(req('ms/calibrate',{domain:'example.com',knownEmail:'jane@example.com'}),e,async()=>{count++;return Response.json({IfExistsResult:0});});assert.equal((await bad.json()).passed,false);assert.equal(count,1);
- const good=await handle(req('ms/calibrate',{domain:'example.com',knownEmail:'jane@example.com'}),e,async(url,init)=>Response.json({IfExistsResult:JSON.parse(init.body).username==='jane@example.com'?0:1}));const calibration=await good.json();assert.equal(calibration.passed,true);
+ const good=await handle(req('ms/calibrate',{domain:'example.com',knownEmail:'jane@example.com'}),e,async(url,init)=>Response.json({IfExistsResult:JSON.parse(init.body).username==='jane@example.com'?0:1}),async()=>{});const calibration=await good.json();assert.equal(calibration.passed,true);
  const result=await handle(req('ms/check',{domain:'example.com',email:'jane@example.com',calibration:calibration.calibration}),e,async()=>Response.json({IfExistsResult:0}));assert.equal((await result.json()).status,'likely-exists');
  await assert.rejects(handle(req('ms/check',{domain:'example.com',email:'jane@second.com',calibration:calibration.calibration}),e,async()=>{throw Error('must not fetch');}),/selected domain/);
+});
+test('managed work-account signals distinguish MSA-only throttle from AAD throttle',()=>{
+ for(const code of [0,1]){
+  const r=classifyMicrosoft({IfExistsResult:code,ThrottleStatus:2,EstsProperties:{DomainType:3}});
+  assert.equal(r.status,code===0?'likely-exists':'likely-nonexistent');assert.equal(r.stop,false);
+  assert.equal(r.diagnostics.throttleScope,'personal');assert.match(r.evidence,/Personal-account lookup was throttled/);
+ }
+ for(const throttle of [1,3,4,-1,'2',true,null])assert.equal(classifyMicrosoft({IfExistsResult:0,ThrottleStatus:throttle,EstsProperties:{DomainType:3}}).stop,true);
+ for(const domainType of [undefined,1,2,4,5,'3'])assert.equal(classifyMicrosoft({IfExistsResult:0,ThrottleStatus:2,EstsProperties:{DomainType:domainType}}).stop,true);
+ for(const code of [2,4,5,6,8,'0',undefined])assert.equal(classifyMicrosoft({IfExistsResult:code,ThrottleStatus:2,EstsProperties:{DomainType:3}}).stop,true);
+ for(const flags of [{CaptchaRequired:true},{Throttled:true},{Error:'blocked'},{IsFederatedNS:true},{Credentials:{FederationRedirectUrl:'https://sso.example.com'}}])assert.equal(classifyMicrosoft({IfExistsResult:0,ThrottleStatus:2,EstsProperties:{DomainType:3},...flags}).stop,true);
+ for(const code of [403,429,500])assert.equal(classifyMicrosoft({IfExistsResult:0,ThrottleStatus:2,EstsProperties:{DomainType:3}},code).stop,true);
+ assert.equal(classifyMicrosoft({IfExistsResult:0,ThrottleStatus:0,EstsProperties:{DomainType:4}}).stop,true);
+});
+test('calibration spaces and rate-limits both controls, retaining safe diagnostics',async()=>{
+ const {e,req}=await fixture();const events=[];
+ e.MS_LIMIT={limit:async()=>{events.push('rate');return {success:true};}};
+ const fetcher=async(url,init)=>{const known=JSON.parse(init.body).username==='jane@example.com';events.push(known?'known':'random');return Response.json({IfExistsResult:known?0:1,ThrottleStatus:known?2:0,EstsProperties:{DomainType:3}});};
+ const r=await (await handle(req('ms/calibrate',{domain:'example.com',knownEmail:'jane@example.com'}),e,fetcher,async ms=>events.push(ms))).json();
+ assert.deepEqual(events,['rate','random',7000,'rate','known']);assert.equal(r.passed,true);assert.equal(r.positive.diagnostics.ThrottleStatus,2);assert.equal(r.negative.status,'likely-nonexistent');
+ assert.equal((await verify(r.calibration,e.ADMIN_PASSWORD)).method,'credentialtype-work-v2');
+ const old=await sign({type:'calibration',domain:'example.com',sid:'test-session',exp:Date.now()+10000,method:'credentialtype-v1'},e.ADMIN_PASSWORD);
+ await assert.rejects(handle(req('ms/check',{domain:'example.com',email:'jane@example.com',calibration:old}),e,()=>{throw Error('must not fetch');}),/Calibrate/);
+});
+test('work-account throttling stays inconclusive and does not label the known user invalid',async()=>{
+ const {e,req}=await fixture();
+ const r=await (await handle(req('ms/calibrate',{domain:'example.com',knownEmail:'jane@example.com'}),e,async(url,init)=>{const known=JSON.parse(init.body).username==='jane@example.com';return Response.json({IfExistsResult:known?0:1,ThrottleStatus:known?1:0,EstsProperties:{DomainType:3}});},async()=>{})).json();
+ assert.equal(r.passed,false);assert.equal(r.positive.stop,true);assert.match(r.evidence,/inconclusive/);assert.doesNotMatch(r.evidence,/not recognized|Check its sign-in name/);
+ let limits=0,calls=0;e.MS_LIMIT={limit:async()=>({success:++limits===1})};
+ await assert.rejects(handle(req('ms/calibrate',{domain:'example.com',knownEmail:'jane@example.com'}),e,async()=>{calls++;return Response.json({IfExistsResult:1});},async()=>{}));assert.equal(calls,1);
+});
+test('page chrome and sales headings are excluded without losing footer emails or real names',()=>{
+ const html='<nav><h3>Navigation Label</h3></nav><header><h2>Primary Heading</h2></header><h2>Service Areas</h2><h3>Schedule a Free Consultation</h3><h3>Jane Smith</h3><h4>José O’Neil</h4><aside><h3>Related Articles</h3></aside><footer><h3>Another Label</h3><p>help@example.com</p></footer>';
+ const r=extractPage(html,'https://example.com/team','example.com');
+ assert.deepEqual(r.people.map(p=>p.name),['Jane Smith','José O’Neil']);assert.equal(r.emails[0].email,'help@example.com');
 });
 test('website crawl respects robots and rejects private DNS and external redirects',async()=>{
  const {e,req}=await fixture();

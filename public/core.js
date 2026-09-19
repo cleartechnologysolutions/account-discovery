@@ -18,7 +18,7 @@ export function textOnly(value) {
     return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '';
   }).replace(/\s+/g, ' ').trim();
 }
-const banned = /\b(about|team|meet|contact|leadership|services|management|executive|director|president|our|read|learn|more|privacy|policy|support|sales|office|careers|news|staff|people|company|board|cookie|business|solutions|customer|chief|officer|view|all|employee|welcome|get|started|resources|group|join|member|senior|partner|global)\b/i;
+const banned = /\b(about|team|meet|contact|leadership|services?|areas|schedule|free|consultation|management|executive|director|president|our|read|learn|more|privacy|policy|support|sales|office|careers|news|staff|people|company|board|cookie|business|solutions|customer|chief|officer|view|all|employee|welcome|get|started|resources|group|join|member|senior|partner|global)\b/i;
 export function plausibleName(value) {
   const s = textOnly(value);
   const parts = s.split(/\s+/);
@@ -73,7 +73,8 @@ export function extractPage(html, url, domain) {
   }
   for(const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi))try{walk(JSON.parse(m[1]));}catch{}
   if(/team|people|staff|leadership|management|directory/i.test(new URL(url).pathname)) {
-    for(const m of noScripts.matchAll(/<h[2-4]\b[^>]*>([\s\S]*?)<\/h[2-4]>/gi)) {
+    const staffContent=noScripts.replace(/<(nav|header|footer|aside)\b[^>]*>[\s\S]*?<\/\1>/gi,' ');
+    for(const m of staffContent.matchAll(/<h[2-4]\b[^>]*>([\s\S]*?)<\/h[2-4]>/gi)) {
       const name=plausibleName(m[1]); if(name && !people.has(name.toLowerCase()))people.set(name.toLowerCase(),{name,email:'',source:url,evidence:'Possible person from team-page heading — review'});
     }
   }

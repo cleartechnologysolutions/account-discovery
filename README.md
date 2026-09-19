@@ -1,4 +1,4 @@
-# Account Discovery 1.0.0
+# Account Discovery 1.0.2
 
 See **START-HERE.md** for the GitHub / Cloudflare dashboard deployment steps.
 
@@ -32,7 +32,7 @@ The app uses a single operator password. For stronger identity controls, place t
 
 Public-page retrieval accepts only HTTPS on the approved domain or its `www` host. It rejects userinfo, alternate ports, external redirects, non-public DNS answers, large bodies, and excluded robots paths. Only add domains controlled by clients you trust: DNS checks and the subsequent outbound fetch are separate resolutions, so this is not intended as an arbitrary public URL-fetching service. Sources never execute in the Worker. Browser results use text nodes rather than injected HTML.
 
-Microsoft queries use only `https://login.microsoftonline.com/common/GetCredentialType`. Result codes 0 and 1 are treated as indicative only following successful controls; all other codes are inconclusive. Federated or throttled responses stop the UI run. There is no password testing, authentication attempt fallback, CAPTCHA solving, endpoint rotation, or proxy rotation. The rate-limit binding allows 12 checking operations per minute per domain per Cloudflare location; a calibration operation makes up to two upstream calls. Cloudflare rate limits are approximate, per-location controls, not a global transactional quota. UI checks run sequentially at a lower pace. Controls do not make undocumented endpoint behavior authoritative.
+Microsoft queries use only `https://login.microsoftonline.com/common/GetCredentialType`. Result codes 0 and 1 are treated as indicative only following successful controls; all other codes are inconclusive. Federated responses and work-account throttling stop the UI run. Microsoft's public sign-in client defines ThrottleStatus 1 as AadThrottled and 2 as MsaThrottled. An MSA-only flag is accepted only for DomainType 3 (Managed), numeric IfExistsResult 0/1, and no other error, challenge, throttle or federation flag; the evidence explicitly notes that personal-account lookup was throttled. Unrecognized throttle values or scopes remain inconclusive. Requests set isOtherIdpSupported and isRemoteNGCSupported to false, along with the FIDO/access-pass/forced-OTP options; no remote passwordless method is requested. There is no password testing, authentication attempt fallback, CAPTCHA solving, endpoint rotation, or proxy rotation. The rate-limit binding allows 12 Microsoft request slots per minute per domain per Cloudflare location; calibration counts each of its two calls separately and waits seven seconds between them. Cloudflare rate limits are approximate, per-location controls, not a global transactional quota. UI checks run sequentially at a lower pace. Controls do not make undocumented endpoint behavior authoritative.
 
 No account findings are stored server-side or written to application logs. Findings and employee names are held in tab memory; exported files contain business contact data. Cloudflare receives application traffic and may retain platform metadata according to the account configuration. Microsoft receives queried candidate usernames. Brave receives search terms if enabled. Client websites receive the public page requests. Worker observability is disabled in the supplied configuration.
 
@@ -50,9 +50,11 @@ Pattern suggestions count exact name/address matches; ties remain ambiguous. Gen
 
 `npm test` runs the parsing/security/response tests and the Miniflare integration test. If using an existing Miniflare installation in a development environment, set `MINIFLARE_MODULE` to its ESM-importable absolute module path.
 
-Pre-delivery checks passed: all 11 automated tests, JS syntax checks, Worker bundling, and static UI reference checks. Upstream Microsoft and Brave behavior was tested with mocks. Live Microsoft calibration against an authorized tenant and real browser interaction must be checked after deployment.
+Pre-delivery checks passed: all 16 automated tests, including local Worker runtime execution, plus JavaScript syntax checks. Microsoft response handling and Brave integration were tested with mocks. One authorized development-environment live control pair also returned the expected Microsoft results, with remote passwordless discovery disabled and both throttle statuses zero; this preceded the final work-account-only request option change. Cloudflare deployment, live Brave search, and browser interaction still require verification after upload.
 
 ## Reference material
+
+- [Microsoft public sign-in client JavaScript](https://aadcdn.msauth.net/shared/1.0/content/js/ConvergedLogin_PCore_gVhYQwpSW-2B6af-e8QqcQ2.js) — inspected for IfExistsResult, ThrottleStatus, DomainType and current-provider request handling on 2026-09-19. This is implementation evidence, not a supported API contract; the asset URL can change.
 
 - [Brave Search API documentation](https://api-dashboard.search.brave.com/app/documentation/web-search/get-started)
 - [Cloudflare Worker rate-limit bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)

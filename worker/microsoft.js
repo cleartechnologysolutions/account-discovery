@@ -12,6 +12,11 @@ export function classifyMicrosoft(data, status=200) {
   const props=object.Credentials || {};
   const diagnostics={httpStatus:status};
   for(const key of ['IfExistsResult','ThrottleStatus','Throttled','CaptchaRequired','IsFederatedNS']) diagnostics[key]=diagnosticValue(object[key]);
+  diagnostics.DomainType=diagnosticValue(object.EstsProperties?.DomainType);
+  // Microsoft's sign-in client defines 1=AadThrottled and 2=MsaThrottled.
+  // Accept an MSA-only flag solely for an explicit managed work-domain result.
+  const throttle=object.ThrottleStatus;
+  diagnostics.throttleScope=throttle===0?'none':throttle===1?'work/school':throttle===2?'personal':throttle===3?'work/school and personal':'unknown';
   diagnostics.hasFederationRedirect=!!props.FederationRedirectUrl;
   diagnostics.hasError=!!(object.Error || object.error);
   const result=(evidence,reason,state='inconclusive')=>({status:state,stop:state==='inconclusive',evidence,reason,diagnostics});
@@ -20,16 +25,19 @@ export function classifyMicrosoft(data, status=200) {
   if(status!==200) return result(`Microsoft returned HTTP ${status}; no account conclusion was made.`,'http_error');
   if(!data || typeof data!=='object') return result('Microsoft did not return a usable JSON discovery object.','invalid_response');
   const code=data.IfExistsResult;
+  const personalOnly=throttle===2 && object.EstsProperties?.DomainType===3 && (code===0 || code===1);
   const reasons=[];
-  if(data.ThrottleStatus) reasons.push('ThrottleStatus is set');
+  if(throttle!==undefined && throttle!==0 && !personalOnly) reasons.push('ThrottleStatus indicates work-account throttling or an unsupported throttle scope');
   if(data.Throttled) reasons.push('Throttled is set');
   if(data.CaptchaRequired) reasons.push('CaptchaRequired is set');
   if(data.Error || data.error) reasons.push('an error field is set');
   if(data.IsFederatedNS) reasons.push('IsFederatedNS is set');
+  if([4,5].includes(object.EstsProperties?.DomainType)) reasons.push('DomainType indicates federation');
   if(props.FederationRedirectUrl) reasons.push('a federation redirect is present');
   if(reasons.length) return result('Response flagged: '+reasons.join('; ')+'. See diagnostic fields; no account conclusion was made.','response_flags');
-  if(code===0) return result('Microsoft discovery returned IfExistsResult=0. This is an account-existence signal, not proof of a mailbox or access.','exists_signal','likely-exists');
-  if(code===1) return result('Microsoft discovery returned IfExistsResult=1. Email aliases and alternate login names can differ.','nonexistent_signal','likely-nonexistent');
+  const note=personalOnly?' Personal-account lookup was throttled; only the explicit managed work-account signal is used.':'';
+  if(code===0) return result('Microsoft discovery returned IfExistsResult=0. This is an account-existence signal, not proof of a mailbox or access.'+note,'exists_signal','likely-exists');
+  if(code===1) return result('Microsoft discovery returned IfExistsResult=1. Email aliases and alternate login names can differ.'+note,'nonexistent_signal','likely-nonexistent');
   return result(`Unrecognized or ambiguous Microsoft response${Number.isInteger(code)?` (IfExistsResult=${code})`:''}.`,'ambiguous_code');
 }
 export async function microsoftCheck(email, fetcher=fetch) {
@@ -37,7 +45,7 @@ export async function microsoftCheck(email, fetcher=fetch) {
     const res=await fetcher('https://login.microsoftonline.com/common/GetCredentialType',{
       method:'POST',redirect:'manual',signal:AbortSignal.timeout(12000),
       headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({username:email,isOtherIdpSupported:true,isRemoteNGCSupported:true,isFidoSupported:true,checkPhones:false,isCookieBannerShown:false,isAccessPassSupported:true})
+      body:JSON.stringify({username:email,isOtherIdpSupported:false,isRemoteNGCSupported:false,isFidoSupported:false,checkPhones:false,isCookieBannerShown:false,isAccessPassSupported:false,forceotclogin:false,otclogindisallowed:true})
     });
     // Never forward upstream HTML, tokens, canaries or redirects to the browser.
     if(res.status!==200) { await res.body?.cancel(); return classifyMicrosoft(null,res.status); }

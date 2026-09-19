@@ -1,10 +1,16 @@
-## Update 1.0.1 — Microsoft diagnostics
+## Update 1.0.2 — Microsoft work-account checks
 
-Upload the contents of this package over the existing files in your GitHub repository and commit. Keep the existing Cloudflare Worker, secrets and domain settings. Build command remains blank; deploy command remains `npx wrangler deploy`.
+1. Extract this ZIP and upload its contents over the existing files in your Account Discovery GitHub repository. Preserve the folders and commit the update.
+2. Let the connected Cloudflare build finish. Keep the existing Worker, secrets, domain allowlist and Brave key. Do not delete or recreate the app. Build command stays blank; deploy command stays `npx wrangler deploy`.
+3. Reload the site and confirm **BUILD 1.0.2**. Export any existing results first: reloading clears the tab's workspace.
+4. Select the client domain, enter its known working Microsoft sign-in name, and click **Calibrate this domain** once. It now waits seven seconds between the two controls. Successful calibration also displays both results.
+5. For internet discovery, enter the company's name and click **Search internet**. Review the names and their source links before generating addresses.
 
-After the connected build succeeds, reload the site and confirm BUILD 1.0.1. Calibrate once. The Microsoft panel now shows each control result and allowlisted diagnostic fields. Copy that panel text for troubleshooting; no DevTools required.
+The previous version incorrectly treated every nonzero throttle status as work-account throttling. Microsoft's sign-in client defines `1` as AAD/work-account throttling and `2` as MSA/personal-account throttling. Version 1.0.2 uses a work-account request and accepts an MSA-only flag only with an explicit managed-domain result and an unambiguous 0/1 account signal. Work-account throttling, ambiguous scopes, challenges, errors, and federation still stop checks. This is still an undocumented account signal, not authoritative directory verification.
 
-This update improves diagnosis; it does not establish that account verification works for a given tenant. Existing conservative stop conditions and request limits remain in place. No raw upstream tokens, cookies or error bodies are displayed.
+This update also disables remote passwordless credential discovery, reports inconclusive results accurately, and removes obvious navigation/sales headings from suggested employee names. Existing sessions can remain signed in, but older calibration tokens must be renewed.
+
+The remaining sections are for first-time installation and general usage.
 
 # Account Discovery — start here
 
@@ -67,7 +73,7 @@ Enter the company's name and click **Search internet**. It looks for published d
 
 Enter **one sign-in name you already know exists** in the selected domain, then click **Calibrate this domain**.
 
-The Worker directly queries Microsoft's username-discovery endpoint with a random nonexistent control and your known account. It does not submit a password or attempt a token-based login.
+The Worker directly queries Microsoft's username-discovery endpoint with a random nonexistent control and your known account, with a seven-second pause between them. It does not submit a password or attempt a token-based login.
 
 - If the two controls are distinguishable, checks unlock for 30 minutes.
 - If controls fail, the app explains the issue and leaves Microsoft checks disabled. You can still discover and export addresses.
@@ -94,6 +100,6 @@ Replace the project files in the same GitHub repository and commit. Let the conn
 
 ## What was tested before delivery
 
-Eleven automated tests passed, including execution in the actual local Workers runtime. Tests cover public-page parsing, scoped email generation, robots exclusions, private-address rejection, session authentication, cross-origin rejection, domain boundaries, rate limiting, and Microsoft control/response handling with simulated upstream data.
+All 16 automated tests passed, including execution in the local Workers runtime. Coverage includes the managed-domain MSA-throttle regression, work-account throttle stops, calibration spacing and rate limits, safe diagnostics, name extraction, sessions, domain boundaries, and mocked Brave searches. JavaScript syntax checks passed.
 
-**No live client tenant was queried, and the app was not deployed to your account.** The live Microsoft calibration and a browser smoke test after deployment remain necessary. No guarantee of current Microsoft endpoint reliability or completeness of discovered employees is made.
+One authorized live pair from the development environment returned the expected nonexistent and existing work-account signals for the supplied client domain. Both returned throttle status zero. That test used remote passwordless discovery disabled but preceded the final change to work-account-only discovery; it does not reproduce Cloudflare's outbound network or prove that the patched deployment will work there. No live Brave search or Cloudflare deployment was performed. Confirm BUILD 1.0.2 and calibrate after updating.

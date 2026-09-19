@@ -82,11 +82,11 @@ async function searchWeb(domain,company,env,fetcher){
 async function bodyJSON(request){try{return JSON.parse(await boundedText(request,32000));}catch(e){if(e.status)throw e;throw fail('Invalid JSON request.');}}
 function domainGuard(input,env){const d=domainOf(input);if(!d||!allowedDomains(env).includes(d))throw fail('This domain is not in ALLOWED_DOMAINS. Add the authorized client domain in Cloudflare Settings.',403);return d;}
 async function sessionFrom(req,env){const token=req.headers.get('cookie')?.match(/(?:^|;\s*)__Host-ad_session=([^;]+)/)?.[1];const s=await verify(token,env.ADMIN_PASSWORD);return s?.type==='session'?s:null;}
-export async function handle(request,env,fetcher=fetch){
+export async function handle(request,env,fetcher=fetch,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))){
   const url=new URL(request.url),path=url.pathname;
   if(!path.startsWith('/api/')){if(!['GET','HEAD'].includes(request.method))return json({error:'Method not allowed'},405);return env.ASSETS.fetch(request);}
   const configured=typeof env.ADMIN_PASSWORD==='string'&&env.ADMIN_PASSWORD.length>=16;
-  if(path==='/api/session'&&request.method==='GET'){const s=configured?await sessionFrom(request,env):null;return json({configured,authenticated:!!s,domains:s?allowedDomains(env):[],webSearch:s?!!env.BRAVE_API_KEY:false,build:'1.0.1'});}
+  if(path==='/api/session'&&request.method==='GET'){const s=configured?await sessionFrom(request,env):null;return json({configured,authenticated:!!s,domains:s?allowedDomains(env):[],webSearch:s?!!env.BRAVE_API_KEY:false,build:'1.0.2'});}
   if(request.method!=='POST')throw fail('Method not allowed.',405);
   if(request.headers.get('origin')!==url.origin || !request.headers.get('content-type')?.startsWith('application/json'))throw fail('Request origin or content type is not allowed.',403);
   if(!configured)throw fail('Add ADMIN_PASSWORD as a Cloudflare secret with at least 16 characters.',503);
@@ -108,15 +108,17 @@ export async function handle(request,env,fetcher=fetch){
       const email=scopedEmail(b.knownEmail,domain);if(!email)throw fail('Enter a known existing sign-in name in the selected domain.');
       const negative='assessment-control-'+crypto.randomUUID().replaceAll('-','')+'@'+domain;
       const neg=await microsoftCheck(negative,fetcher);
-      if(neg.status!=='likely-nonexistent')return json({passed:false,evidence:'Random nonexistent control was not distinguished. Microsoft checks are unavailable for this domain with this method.',negative:neg});
+      if(neg.status!=='likely-nonexistent')return json({passed:false,evidence:neg.stop?'Calibration is inconclusive on the nonexistent control. '+neg.evidence:'Random nonexistent control was not distinguished. Microsoft checks are unavailable for this domain with this method.',negative:neg});
+      await pause(7000);
+      await limit(env.MS_LIMIT,domain);
       const pos=await microsoftCheck(email,fetcher);
-      if(pos.status!=='likely-exists')return json({passed:false,evidence:'Known existing control was not recognized. Check its sign-in name; this method may be unsupported for the domain.',positive:pos,negative:neg});
+      if(pos.status!=='likely-exists')return json({passed:false,evidence:pos.stop?'Calibration is inconclusive on the known account. '+pos.evidence:'Microsoft returned a nonexistent signal for the known account. Check its sign-in name; this method may be unsupported for the domain.',positive:pos,negative:neg});
       const expires=Date.now()+30*60000;
-      const calibration=await sign({type:'calibration',domain,sid:session.id,exp:expires,method:'credentialtype-v1'},env.ADMIN_PASSWORD);
-      return json({passed:true,calibration,expires,evidence:'Existing and random nonexistent controls returned different expected responses. Results remain indicative, not directory verification.'});
+      const calibration=await sign({type:'calibration',domain,sid:session.id,exp:expires,method:'credentialtype-work-v2'},env.ADMIN_PASSWORD);
+      return json({passed:true,calibration,expires,negative:neg,positive:pos,evidence:'Existing and random nonexistent controls returned different expected responses. Results remain indicative, not directory verification.'});
     }
     const cal=await verify(b.calibration,env.ADMIN_PASSWORD);
-    if(cal?.type!=='calibration'||cal.domain!==domain||cal.sid!==session.id||cal.method!=='credentialtype-v1')throw fail('Calibrate Microsoft checks for this domain first. Calibration lasts 30 minutes.',409);
+    if(cal?.type!=='calibration'||cal.domain!==domain||cal.sid!==session.id||cal.method!=='credentialtype-work-v2')throw fail('Calibrate Microsoft checks for this domain first. Calibration lasts 30 minutes.',409);
     if(path==='/api/ms/control'){
       const r=await microsoftCheck('assessment-control-'+crypto.randomUUID().replaceAll('-','')+'@'+domain,fetcher);
       return json({passed:r.status==='likely-nonexistent',...r,checkedAt:new Date().toISOString()});
