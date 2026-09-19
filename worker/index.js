@@ -86,7 +86,7 @@ export async function handle(request,env,fetcher=fetch){
   const url=new URL(request.url),path=url.pathname;
   if(!path.startsWith('/api/')){if(!['GET','HEAD'].includes(request.method))return json({error:'Method not allowed'},405);return env.ASSETS.fetch(request);}
   const configured=typeof env.ADMIN_PASSWORD==='string'&&env.ADMIN_PASSWORD.length>=16;
-  if(path==='/api/session'&&request.method==='GET'){const s=configured?await sessionFrom(request,env):null;return json({configured,authenticated:!!s,domains:s?allowedDomains(env):[],webSearch:s?!!env.BRAVE_API_KEY:false,build:'1.0.0'});}
+  if(path==='/api/session'&&request.method==='GET'){const s=configured?await sessionFrom(request,env):null;return json({configured,authenticated:!!s,domains:s?allowedDomains(env):[],webSearch:s?!!env.BRAVE_API_KEY:false,build:'1.0.1'});}
   if(request.method!=='POST')throw fail('Method not allowed.',405);
   if(request.headers.get('origin')!==url.origin || !request.headers.get('content-type')?.startsWith('application/json'))throw fail('Request origin or content type is not allowed.',403);
   if(!configured)throw fail('Add ADMIN_PASSWORD as a Cloudflare secret with at least 16 characters.',503);

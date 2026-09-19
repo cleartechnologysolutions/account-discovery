@@ -1,3 +1,11 @@
+## Update 1.0.1 — Microsoft diagnostics
+
+Upload the contents of this package over the existing files in your GitHub repository and commit. Keep the existing Cloudflare Worker, secrets and domain settings. Build command remains blank; deploy command remains `npx wrangler deploy`.
+
+After the connected build succeeds, reload the site and confirm BUILD 1.0.1. Calibrate once. The Microsoft panel now shows each control result and allowlisted diagnostic fields. Copy that panel text for troubleshooting; no DevTools required.
+
+This update improves diagnosis; it does not establish that account verification works for a given tenant. Existing conservative stop conditions and request limits remain in place. No raw upstream tokens, cookies or error bodies are displayed.
+
 # Account Discovery — start here
 
 A private tool for your authorized client assessments. No D1 database, R2 bucket, SQL setup, build command, or Microsoft application registration is required for this version.

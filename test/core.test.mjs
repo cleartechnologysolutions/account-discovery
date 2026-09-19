@@ -72,3 +72,13 @@ test('optional web search returns sourced addresses and unconfirmed profile name
  const {e,req}=await fixture();e.BRAVE_API_KEY='test-key';let calls=0;
  const r=await handle(req('search',{domain:'example.com',company:'Example Company'}),e,async(url,init)=>{calls++;assert.ok(url.startsWith('https://api.search.brave.com/'));assert.equal(init.headers['X-Subscription-Token'],'test-key');return Response.json({web:{results:[{url:'https://www.linkedin.com/in/jane-smith',title:'Jane Smith - Example Company | LinkedIn',description:'Example Company. jsmith@example.com'},{url:'javascript:evil',title:'ignore'}]}});});const data=await r.json();assert.equal(calls,3);assert.equal(data.people[0].name,'Jane Smith');assert.match(data.people[0].evidence,/unconfirmed/);assert.equal(data.sources.length,1);
 });
+test('Microsoft diagnostics identify each flag and never expose upstream secrets',()=>{
+ for(const [field,value] of [['ThrottleStatus',1],['Throttled',true],['CaptchaRequired',true],['IsFederatedNS',true]]){
+  const r=classifyMicrosoft({IfExistsResult:1,[field]:value});assert.match(r.evidence,new RegExp(field));assert.equal(r.diagnostics[field],value);assert.equal(r.status,'inconclusive');
+ }
+ const r=classifyMicrosoft({IfExistsResult:0,Error:'secret-error-body',Credentials:{FederationRedirectUrl:'https://secret.example/token'},Token:'secret-token'});
+ const json=JSON.stringify(r);assert.ok(!json.includes('secret'));assert.equal(r.diagnostics.hasError,true);assert.equal(r.diagnostics.hasFederationRedirect,true);
+ assert.equal(classifyMicrosoft({IfExistsResult:1,ThrottleStatus:0}).status,'likely-nonexistent');
+ assert.equal(classifyMicrosoft({IfExistsResult:1,ThrottleStatus:'0'}).diagnostics.ThrottleStatus,'0');
+ assert.equal(classifyMicrosoft(null,403).reason,'http_forbidden');assert.equal(classifyMicrosoft(null,429).reason,'http_throttled');
+});
